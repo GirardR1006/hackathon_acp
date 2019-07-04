@@ -152,16 +152,18 @@ object App extends CPModel with App {
   // start time is the start time of the worksheet + t
   val starts = for ((i,t) <- allTasks) yield startTimeWorksheet(i) + t
   // duration of every task is 1 day
-  val durations = for ((i,t) <- allTasks) yield CPIntVar(1)
+  val one = CPIntVar(1)
+  val durations = Array.fill(allTasks.length)(one)
   // end is start + duration
   val ends = (starts zip durations).map{case (start, duration) => start+duration}
   // demand is the number of workers needed that day
   val demands = for ((i,t) <- allTasks) yield CPIntVar(worksheets(i).nbWorkers(t))
 
-  val resources = for((i,t) <- allTasks) yield {
+  val resourceForWorksheetOrMinusOne = for(i <- 0 until W) yield {
     if (worksheets(i).mandatory) CPIntVar(worksheets(i).workcenterID)
     else (useWorksheet(i) * (1 + worksheets(i).workcenterID)) - 1 // this is -1 if useWorksheet(i)=0 and workcenterID otherwise
   }
+  val resources = for((i,t) <- allTasks) yield resourceForWorksheetOrMinusOne(i)
 
   for (workcenterID <- 0 until C) {
     add(maxCumulativeResource(starts, durations, ends, demands, resources, CPIntVar(c_v(workcenterID)), workcenterID))
@@ -182,8 +184,70 @@ object App extends CPModel with App {
   for(i <- maxBlock.indices) {
     val (max, set) = maxBlock(i)
     // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
-    val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise
+    val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise. Handles worksheets not being used, because then the road will be -1, thus not in set.
+
     add( maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)) )
   }
+
+
+  import scala.util.Random
+  val rng = new Random(100)
+  def uniform(from: Int, to: Int): Int = from + rng.nextInt(to - from)
+
+
+  class Solution(val useW: Array[Boolean], val startW: Array[Int]) {
+    lazy val realisable: Boolean = {
+      try {
+        val stats = startSubjectTo(nSols = 1) {
+          for (i <- 0 until W) {
+            useWorksheet(i).assign(if (useW(i)) 1 else 0)
+            startTimeWorksheet(i).assign(startW(i))
+          }
+        }
+        stats.nSols >= 1
+      }
+      catch {
+        case _ => false
+      }
+    }
+
+    def penalty: Int = {
+      var p = 0
+      for (i <- 0 until W if useW(i)) {
+        for (j <- 0 until worksheets(i).duration) {
+          val t = startW(i) + j
+          val road = worksheets(i).roads(j)
+          p += perturbationCost(road, t)
+        }
+      }
+      p
+    }
+
+    lazy val score = (0 until W).filter(useW).map(i => worksheets(i).importance).sum - penalty
+  }
+
+
+  object Solution {
+    def random(): Solution = {
+      val useWorksheet = (for (i <- 0 until W) yield if (worksheets(i).mandatory) true else rng.nextBoolean()).toArray
+      val startTime = worksheets.map(w => uniform(w.est, w.lst))
+      new Solution(useWorksheet, startTime)
+    }
+
+    def cross1(s1: Solution, s2: Solution): (Solution, Solution) = {
+      val i = uniform(1, W-1)
+
+      val new1 = new Solution(s1.useW.take(i) ++ s2.useW.drop(i),
+        s1.startW.take(i) ++ s2.startW.drop(i))
+
+      val new2 = new Solution(s2.useW.take(i) ++ s1.useW.drop(i),
+        s2.startW.take(i) ++ s1.startW.drop(i))
+
+      (new1, new2)
+    }
+  }
+
+  for (i <- 0 until 10) println(Solution.random().realisable)
+
 
 }
