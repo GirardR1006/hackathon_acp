@@ -208,7 +208,7 @@ object App extends CPModel with App {
 
   val perturbationCostOfTime: Array[Array[Int]]= Array.tabulate(T,N)((t,n) => perturbationCost(n)(t))
   val perturbationDay = Array.tabulate(T)(t => {
-    val isRoadWorkedOn: Array[CPIntVar] = (0 until N).map(road => {
+    val isRoadWorkedOn: Array[CPIntVar] = Array.tabulate(N)(road => {
       // il ne peut y avoir que 0 ou 1 route active ici
       val binaryVector = roadToActivities(road)
         .filter { case (i, t2) => useWorksheet(i).containsTrue &&
@@ -245,7 +245,8 @@ object App extends CPModel with App {
     println("SCORE")
     println(objective.value)
 
-    bestSol = Solution.getFromSolverAndSave()
+    if (objective.value >= bestSol.score)
+      bestSol = Solution.getFromSolverAndSave()
   }
 
   import scala.util.Random
@@ -275,15 +276,13 @@ object App extends CPModel with App {
     }
 
     def penalty: Int = {
-      var p = 0
-      for (i <- 0 until W if useW(i)) {
-        for (j <- 0 until worksheets(i).duration) {
-          val t = startW(i) + j
-          val road = worksheets(i).roads(j)
-          p += perturbationCost(road)(t)
-        }
-      }
-      p
+      val perturbationPerDay = Array.tabulate(T)(t =>
+        allTasks
+          .filter{case (i, t2) => startW(i)+t2 == t}
+          .map{case (i, t2) => perturbationCost(worksheets(i).roads(t2))(t)}
+          .sum
+      )
+      perturbationPerDay.max
     }
 
     lazy val score = (0 until W).filter(useW).map(i => worksheets(i).importance).sum - penalty
@@ -295,6 +294,7 @@ object App extends CPModel with App {
       val oos = new ObjectOutputStream(new FileOutputStream(s"$filename.sol"))
       oos.writeObject(sol)
       oos.close()
+      println("saved solution to file")
       sol
     }
 
@@ -340,9 +340,12 @@ object App extends CPModel with App {
   }
 
   var alpha = 10
+  var limit = 50
 
-  while (true) {
-    val stat = startSubjectTo(failureLimit = 50) {
+  var startTime = System.currentTimeMillis()
+
+  while (System.currentTimeMillis() - startTime < 3*60*60*1000) {
+    val stat = startSubjectTo(failureLimit = limit) {
       for (i <- 0 until W if rng.nextInt(100) > alpha) {
         add( startTimeWorksheet(i) === bestSol.startW(i) )
         add( useWorksheet(i) === (if(bestSol.useW(i)) 1 else 0 ) )
@@ -350,7 +353,17 @@ object App extends CPModel with App {
     }
 
     alpha = if (stat.completed) alpha+1 else alpha-1
-    println(s"*** alpha is now $alpha")
+    if (alpha <= 0) {
+      alpha = 10
+      limit *= 2
+    } else if (alpha >= 120) {
+      println("current best:")
+      for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
+      println("finding best solution once and for all...")
+      val stats = start()
+      for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
+      System.exit(0)
+    }
   }
 
 
