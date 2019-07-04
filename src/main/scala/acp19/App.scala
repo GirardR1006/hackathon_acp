@@ -10,7 +10,6 @@ import scala.collection.mutable
  */
 object App extends CPModel with App {
   val filename = args(0)
-
   //*****************************
   //* parsing of the input file *
   //*****************************
@@ -189,15 +188,22 @@ object App extends CPModel with App {
     val (max, set) = maxBlock(i)
     // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
     val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise
-    add( maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)) )
-
+    add(maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)))
+  }
   // **********************
   // * Objective function *
   // **********************
 
   // Maximize total gain and minimze total traffic perturbation
   val importanceArray = for (i <- worksheets.indices) yield useWorksheet(i) * worksheets(i).importance
-  maximize(sum(importanceArray))
+  // Calculate perturbation per day
+  val penalty: CPIntVar = sum(allTasks) { case (i, t) => {
+    val perturbationPerRoad = perturbationCost(worksheets(i).roads(t))
+    element(perturbationPerRoad, startTimeWorksheet(i) + t)
+  }
+  }
+
+  maximize(sum(importanceArray) - penalty)
 
 
   // ****************************
@@ -209,5 +215,5 @@ object App extends CPModel with App {
   }
   val stats = start()
   println(stats)
-  }
+
 }
