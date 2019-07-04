@@ -245,7 +245,7 @@ object App extends CPModel with App {
     println("SCORE")
     println(objective.value)
 
-    if (objective.value >= bestSol.score)
+    if (bestSol == null || objective.value >= bestSol.score)
       bestSol = Solution.getFromSolverAndSave()
   }
 
@@ -257,7 +257,7 @@ object App extends CPModel with App {
   class Solution(val useW: Array[Boolean], val startW: Array[Int]) extends Serializable {
     override val toString: String = {
       var s = ""
-      for (i <- 0 until W if useW(i)) s += s"$i ${startW(i)}"
+      for (i <- 0 until W if useW(i)) s += s"$i ${startW(i)}\n"
       s
     }
     lazy val realisable: Boolean = {
@@ -344,7 +344,7 @@ object App extends CPModel with App {
 
   var startTime = System.currentTimeMillis()
 
-  while (System.currentTimeMillis() - startTime < 3*60*60*1000) {
+  while (System.currentTimeMillis() - startTime < 2*60*60*1000) {
     val stat = startSubjectTo(failureLimit = limit) {
       for (i <- 0 until W if rng.nextInt(100) > alpha) {
         add( startTimeWorksheet(i) === bestSol.startW(i) )
@@ -358,14 +358,12 @@ object App extends CPModel with App {
       limit *= 2
     } else if (alpha >= 120) {
       println("current best:")
-      for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
+      println(bestSol)
       println("finding best solution once and for all...")
       val stats = start()
-      for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
+      println(bestSol)
+      println(stats)
       System.exit(0)
     }
   }
-
-
-
 }
