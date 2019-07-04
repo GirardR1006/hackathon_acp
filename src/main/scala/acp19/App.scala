@@ -1,5 +1,7 @@
 package acp19
 
+import java.io.{FileInputStream, FileOutputStream, ObjectInputStream, ObjectOutputStream}
+
 import oscar.algo.search.{Branching, IntConstrainableContext}
 import oscar.cp._
 import oscar.cp.core.delta.DeltaIntVar
@@ -168,7 +170,8 @@ object App extends CPModel with App {
   val resources = for((i,t) <- allTasks) yield resourceForWorksheetOrMinusOne(i)
 
   for (workcenterID <- 0 until C) {
-    add(maxCumulativeResource(starts, durations, ends, demands, resources, CPIntVar(c_v(workcenterID)), workcenterID))
+    add(maxCumulativeResource(starts, durations, ends, demands, resources, CPIntVar(c_v(workcenterID)), workcenterID),
+      Weak)
   }
 
   // not two works on the same road at the same time
@@ -176,7 +179,7 @@ object App extends CPModel with App {
   val roads = for ((i,t) <- allTasks) yield optionalIntVar(worksheets(i).roads(t), useWorksheet(i)) // the road number if the worksheet is used, -1 otherwise
 
   for (road <- 0 until N if worksheets.flatMap(_.roads).contains(road))
-    add(unaryResource(starts, durations, ends, roads, road))
+    add(unaryResource(starts, durations, ends, roads, road), Weak)
 
 
   // for road crossing constraints:
@@ -188,7 +191,7 @@ object App extends CPModel with App {
     val (max, set) = maxBlock(i)
     // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
     val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise
-    add(maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)))
+    add(maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)), Weak)
   }
   // **********************
   // * Objective function *
@@ -205,10 +208,16 @@ object App extends CPModel with App {
 
   val perturbationCostOfTime: Array[Array[Int]]= Array.tabulate(T,N)((t,n) => perturbationCost(n)(t))
   val perturbationDay = Array.tabulate(T)(t => {
-    val isRoadWorkedOn: Array[CPIntVar] = (0 until N).filter(roadToActivities(_).nonEmpty).map(road =>
+    val isRoadWorkedOn: Array[CPIntVar] = (0 until N).map(road => {
       // il ne peut y avoir que 0 ou 1 route active ici
-      isOr(roadToActivities(road).map{case (i,t2) => startTimeWorksheet(i)+t2 ?=== t})
-    )
+      val binaryVector = roadToActivities(road)
+        .filter { case (i, t2) => useWorksheet(i).containsTrue &&
+          startTimeWorksheet(i).getMin + t2 <= t && t <= startTimeWorksheet(i).getMax + t2
+        }
+        .map { case (i, t2) => useWorksheet(i) & (startTimeWorksheet(i) + t2 ?=== t) }
+      if (binaryVector.nonEmpty) isOr(binaryVector)
+      else CPBoolVar(false)
+    })
     weightedSum(perturbationCostOfTime(t), isRoadWorkedOn)
   })
 
@@ -228,24 +237,23 @@ object App extends CPModel with App {
 
   search(
     conflictOrderingSearch(useWorksheet.map(i => i: CPIntVar), identity, maxVal(useWorksheet.map(i => i: CPIntVar)))
-    ++ binarySplitIdx(startTimeWorksheet, i => worksheets(i).importance)
+    ++ binarySplitIdx(startTimeWorksheet, i => worksheets(i).importance + rng.nextInt(10))
   )
 
   onSolution{
     for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
     println("SCORE")
     println(objective.value)
-    println("mandatory:")
-    println(useWorksheet.mkString(", "))
 
-    bestSol = Solution.getFromSolver()
+    bestSol = Solution.getFromSolverAndSave()
   }
 
   import scala.util.Random
   val rng = new Random(100)
   def uniform(from: Int, to: Int): Int = from + rng.nextInt(to - from)
 
-  class Solution(val useW: Array[Boolean], val startW: Array[Int]) {
+  @SerialVersionUID(123L)
+  class Solution(val useW: Array[Boolean], val startW: Array[Int]) extends Serializable {
     override val toString: String = {
       var s = ""
       for (i <- 0 until W if useW(i)) s += s"$i ${startW(i)}"
@@ -282,7 +290,28 @@ object App extends CPModel with App {
   }
 
   object Solution {
-    def getFromSolver(): Solution = new Solution(useWorksheet.map(_.isTrue), startTimeWorksheet.map(_.value))
+    def getFromSolverAndSave(): Solution = {
+      val sol = new Solution(useWorksheet.map(_.isTrue), startTimeWorksheet.map(_.value))
+      val oos = new ObjectOutputStream(new FileOutputStream(s"$filename.sol"))
+      oos.writeObject(sol)
+      oos.close()
+      sol
+    }
+
+    def getFromFile(): Option[Solution] = {
+      try {
+        val ois = new ObjectInputStream(new FileInputStream(s"$filename.sol"))
+        val sol = ois.readObject().asInstanceOf[Solution]
+        ois.close()
+        println(s"successfully loaded solution from file $filename.sol")
+        Some(sol)
+      } catch {
+        case _ => {
+          println("unable to load solution from file")
+          None
+        }
+      }
+    }
 
     def random(): Solution = {
       val useWorksheet = (for (i <- 0 until W) yield if (worksheets(i).mandatory) true else rng.nextBoolean()).toArray
@@ -304,21 +333,24 @@ object App extends CPModel with App {
   }
 
   var bestSol: Solution = _
-  val stats = start(1)
 
+  Solution.getFromFile() match {
+    case Some(s) => bestSol = s
+    case None => val stats = start(1)
+  }
 
-  var limit = 100
+  var alpha = 10
 
-  for (r <- 0 to 200) {
-    val stat = startSubjectTo(failureLimit = limit) {
-      for (i <- 0 until W if rng.nextInt(100) > 30) {
+  while (true) {
+    val stat = startSubjectTo(failureLimit = 50) {
+      for (i <- 0 until W if rng.nextInt(100) > alpha) {
         add( startTimeWorksheet(i) === bestSol.startW(i) )
         add( useWorksheet(i) === (if(bestSol.useW(i)) 1 else 0 ) )
       }
     }
 
-    limit = if (stat.completed) limit / 2 else limit * 2
-    println(s"*** limit is now $limit")
+    alpha = if (stat.completed) alpha+1 else alpha-1
+    println(s"*** alpha is now $alpha")
   }
 
 
