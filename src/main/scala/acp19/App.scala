@@ -118,7 +118,7 @@ object App extends CPModel with App {
   // work center capacity
   // TODO we can use the following oscar global constraint: maxCumulativeRessource:
   /*  Discrete Resource constraint with maximum capacity: at any time, the cumulative demands of the tasks executing on the resource id, must be <= than the capacity
-    *
+    * maxCumulativeResource(starts: Array[CPIntVar], durations: Array[CPIntVar], ends: Array[CPIntVar], demands: Array[CPIntVar], resources: Array[CPIntVar], capacity: CPIntVar, id: Int): Constraint
     * @param starts    the variables representing the start time of the tasks
     * @param durations the variables representing the duration of the tasks
     * @param ends      the variables representing the completion time of the tasks, it is your responsibility to link starts, durations and ends such that start(i) + durations(i) = ends(i)
@@ -128,6 +128,19 @@ object App extends CPModel with App {
     * @param id        , the resource on which we want to constraint the capacity (only tasks i with resources(i) = id are taken into account)
     * @return a constraint enforcing that the load over the resource is always below/at its capacity at any point of time
     */
+  // start time is the start time of the worksheet + t
+  val starts: Array[CPIntVar] = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+    yield startTimeWorksheet(i) + t
+  // duration of every task is 1 day
+  val durations: Array[CPIntVar] = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+    yield CPIntVar(1)
+  val ends: Array[CPIntVar] = (starts zip durations).map{case (start, duration) => start+duration}
+  val demands: Array[CPIntVar] = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+    yield CPIntVar(worksheets(i).nbWorkers(t))
+  val resources = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+    yield CPIntVar(worksheets(i).workcenterID)
 
-  // add(maxCumulativeResource())
+  for (workcenterID <- 0 until C) {
+    add(maxCumulativeResource(starts, durations, ends, demands, resources, CPIntVar(c_v(workcenterID)), workcenterID))
+  }
 }
