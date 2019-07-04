@@ -1,5 +1,6 @@
 package acp19
 
+import oscar.algo.search.Branching
 import oscar.cp._
 
 import scala.collection.mutable
@@ -176,6 +177,13 @@ object App extends CPModel with App {
 
 
   // for road crossing constraints:
-  // use atMost def atMost(n: Int, x: IndexedSeq[CPIntVar], s: Set[Int]) = {
-  // or GCC
+  // on définit une ressource par set de routes limités, avec la capacité = le nombre max de routes bloquées
+  // dans le groupe.
+  for(i <- maxBlock.indices) {
+    val (max, set) = maxBlock(i)
+    // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
+    val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise
+    add( maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)) )
+  }
+
 }
