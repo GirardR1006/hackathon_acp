@@ -8,7 +8,7 @@ import scala.collection.mutable
  * @author ${user.name}
  */
 object App extends CPModel with App {
-  val filename = args(0)
+  val filename = "Instances/EASY_5_3.txt"
 
   //*****************************
   //* parsing of the input file *
@@ -48,7 +48,11 @@ object App extends CPModel with App {
 
   // worksheets
   case class Worksheet(workcenterID: Int, mandatory: Boolean, importance: Int, est: Int, lst: Int, duration: Int,
-    roads: Array[Int], nbWorkers: Array[Int])
+    roads: Array[Int], nbWorkers: Array[Int]){override def toString(): String ={
+    "Assigned workcenter: "+ Worksheet.this.workcenterID +
+    "\nMandatory: " + Worksheet.this.mandatory +
+    "\nImportance: " + Worksheet.this.importance
+  }}
 
   var worksheets = Array[Worksheet]()
   for (i <- 0 until W) {
@@ -178,4 +182,24 @@ object App extends CPModel with App {
   // for road crossing constraints:
   // use atMost def atMost(n: Int, x: IndexedSeq[CPIntVar], s: Set[Int]) = {
   // or GCC
+
+  // **********************
+  // * Objective function *
+  // **********************
+
+  // Maximize total gain and minimze total traffic perturbation
+  val importanceArray = for (i <- worksheets.indices) yield useWorksheet(i) * worksheets(i).importance
+  maximize(sum(importanceArray))
+
+
+  // ****************************
+  // * Search and print results *
+  // ****************************
+  search(binaryFirstFail(useWorksheet ++ startTimeWorksheet))
+  onSolution{
+    for (i <- 0 until W if useWorksheet(i).isTrue) (println(i + " " + startTimeWorksheet(i)))
+  }
+  val stats = start()
+  println(stats)
+
 }
