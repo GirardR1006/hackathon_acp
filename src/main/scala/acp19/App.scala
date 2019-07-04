@@ -115,4 +115,20 @@ object App extends CPModel with App {
   for ((i,j) <- prec){
     add(startTimeWorksheet(i) + worksheets(i).duration <= startTimeWorksheet(j))
   }
+
+  // work center capacity
+  // TODO we can use the following oscar global constraint: maxCumulativeRessource
+  /*
+    * Discrete Resource constraint with maximum capacity: at any time, the cumulative demands of the tasks executing on the resource id, must be <= than the capacity
+    *
+    * @param starts    the variables representing the start time of the tasks
+    * @param durations the variables representing the duration of the tasks
+    * @param ends      the variables representing the completion time of the tasks, it is your responsibility to link starts, durations and ends such that start(i) + durations(i) = ends(i)
+    * @param demands   the variables representing how much each task consume of the resource
+    * @param resources the variables representing the resource where the task is scheduled
+    * @param capacity  the capacity of the resource
+    * @param id        , the resource on which we want to constraint the capacity (only tasks i with resources(i) = id are taken into account)
+    * @return a constraint enforcing that the load over the resource is always below/at its capacity at any point of time
+    */
+  add(maxCumulativeResource())
 }
