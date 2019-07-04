@@ -212,25 +212,38 @@ object App extends CPModel with App {
     weightedSum(perturbationCostOfTime(t), isRoadWorkedOn)
   })
 
-  if (importanceArray.isEmpty) minimize(maximum(perturbationDay))
-  else maximize(sum(importanceArray) - maximum(perturbationDay))
+  val importanceInevitable = worksheets.indices.filter(i => useWorksheet(i).isTrue).map(i => worksheets(i).importance).sum
+
+  val objective = if (importanceArray.isEmpty) -maximum(perturbationDay) + importanceInevitable
+  else sum(importanceArray) - maximum(perturbationDay) + importanceInevitable
+
+  maximize(objective)
 
   // ****************************
   // * Search and print results *
   // ****************************
   val decisionVars = useWorksheet ++ startTimeWorksheet
 
-  search(conflictOrderingSearch(decisionVars, minDom(decisionVars), maxVal(decisionVars)))
+  //search(conflictOrderingSearch(decisionVars, minDom(decisionVars), i => if (i < W) decisionVars(i).getMax else decisionVars(i).getMin))
+
+  search(
+    conflictOrderingSearch(useWorksheet.map(i => i: CPIntVar), identity, maxVal(useWorksheet.map(i => i: CPIntVar)))
+    ++ binarySplitIdx(startTimeWorksheet, i => worksheets(i).importance)
+  )
+
   onSolution{
     for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
+    println("SCORE")
+    println(objective.value)
+    println("mandatory:")
+    println(useWorksheet.mkString(", "))
+
+    bestSol = Solution.getFromSolver()
   }
-  val stats = start()
-  println(stats)
 
   import scala.util.Random
   val rng = new Random(100)
   def uniform(from: Int, to: Int): Int = from + rng.nextInt(to - from)
-
 
   class Solution(val useW: Array[Boolean], val startW: Array[Int]) {
     override val toString: String = {
@@ -268,8 +281,9 @@ object App extends CPModel with App {
     lazy val score = (0 until W).filter(useW).map(i => worksheets(i).importance).sum - penalty
   }
 
-
   object Solution {
+    def getFromSolver(): Solution = new Solution(useWorksheet.map(_.isTrue), startTimeWorksheet.map(_.value))
+
     def random(): Solution = {
       val useWorksheet = (for (i <- 0 until W) yield if (worksheets(i).mandatory) true else rng.nextBoolean()).toArray
       val startTime = worksheets.map(w => uniform(w.est, w.lst))
@@ -288,4 +302,25 @@ object App extends CPModel with App {
       (new1, new2)
     }
   }
+
+  var bestSol: Solution = _
+  val stats = start(1)
+
+
+  var limit = 100
+
+  for (r <- 0 to 200) {
+    val stat = startSubjectTo(failureLimit = limit) {
+      for (i <- 0 until W if rng.nextInt(100) > 30) {
+        add( startTimeWorksheet(i) === bestSol.startW(i) )
+        add( useWorksheet(i) === (if(bestSol.useW(i)) 1 else 0 ) )
+      }
+    }
+
+    limit = if (stat.completed) limit / 2 else limit * 2
+    println(s"*** limit is now $limit")
+  }
+
+
+
 }
