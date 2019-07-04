@@ -128,6 +128,10 @@ object App extends CPModel with App {
     * @param id        , the resource on which we want to constraint the capacity (only tasks i with resources(i) = id are taken into account)
     * @return a constraint enforcing that the load over the resource is always below/at its capacity at any point of time
     */
+  // in OscaR's example of optional tasks ( https://bitbucket.org/oscarlib/oscar/src/default/oscar-cp/src/main/examples/oscar/examples/cp/scheduling/OptionalTasks.scala )
+  // they use a fake resource, which tasks use if they are not selected
+  // then, they put maxCumulativeResource on the real resources and not the fake one.
+  // we could do the same, have the resource be -1 if the optional task is not used, and 1 otherwise
   // start time is the start time of the worksheet + t
   val starts = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
     yield startTimeWorksheet(i) + t
