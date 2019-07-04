@@ -1,6 +1,6 @@
 package acp19
 
-import oscar.cp.CPModel
+import oscar.cp._
 
 import scala.collection.mutable
 
@@ -87,13 +87,32 @@ object App extends CPModel with App {
   }
 
   // precedences
-  var pred = Array[(Int,Int)]()
+  var prec = Array[(Int,Int)]()
   while (scanner.hasNext("P")) {
     scanner.next() // discard the next
-    pred :+= (scanner.nextInt, scanner.nextInt)
+    prec :+= (scanner.nextInt, scanner.nextInt)
   }
 
-  
+  // **********************
+  // * Decision variables *
+  // **********************
 
+  val startTimeWorksheet = Array.fill(W)(CPIntVar(0 until T)) // Beginning of worksheet (Array)
 
+  // ***************
+  // * Constraints *
+  // ***************
+
+  // every worksheet starts after its earliest starting time
+  // TODO deal with non mandatory worksheets
+  for (i <- 0 until W if worksheets(i).mandatory) add(startTimeWorksheet(i) >= worksheets(i).est)
+
+  // every worksheet starts before its earliest starting time
+  // TODO deal with non mandatory worksheets
+  for (i <- 0 until W if worksheets(i).mandatory) add(startTimeWorksheet(i) <= worksheets(i).lst)
+
+  // Precedence constraint : if worksheet i preceeds worksheet j, ensure the worksheet i will finish before j
+  for ((i,j) <- prec){
+    add(startTimeWorksheet(i) + worksheets(i).duration <= startTimeWorksheet(j))
+  }
 }
