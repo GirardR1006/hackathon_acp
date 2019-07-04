@@ -86,21 +86,23 @@ object App extends CPModel with App {
     worksheets :+= Worksheet(workcenterId, mandatory, importance, est, lst, duration, roads, nbWorkers)
   }
 
-  // maximal number of roads simultaneously blocked
-  var maxBlock = Array[(Int,Set[Int])]()
-  while (scanner.hasNext("M")) {
-    scanner.next() // discard the M
-    val max = scanner.nextInt()
-    val roads = scanner.nextLine().split(" ").filter(_ != "").map(_.toInt).toSet
-    maxBlock :+= (max, roads)
-  }
-
   // precedences
   var prec = Array[(Int,Int)]()
-  while (scanner.hasNext("P")) {
-    scanner.next() // discard the next
-    prec :+= (scanner.nextInt, scanner.nextInt)
+  // maximal number of roads simultaneously blocked
+  var maxBlock = Array[(Int,Set[Int])]()
+
+  while (scanner.hasNext("M") || scanner.hasNext("P")) {
+    if (scanner.hasNext("M")) {
+      scanner.next()
+      val max = scanner.nextInt()
+      val roads = scanner.nextLine().split(" ").filter(_ != "").map(_.toInt).toSet
+      maxBlock :+= (max, roads)
+    } else if (scanner.hasNext("P")) {
+      scanner.next() // discard the next
+      prec :+= (scanner.nextInt, scanner.nextInt)
+    }
   }
+
   for ((i,j) <- prec) assert(! prec.contains((j,i)) )
 
   // **********************
@@ -121,7 +123,14 @@ object App extends CPModel with App {
   // Precedence constraint : if worksheet i preceeds worksheet j, ensure the worksheet i will finish before j
   for ((i,j) <- prec){
     // we don't do i OR we don't do j or we do it in the right order
-    add( !useWorksheet(i) | !useWorksheet(j) | (startTimeWorksheet(i) + worksheets(i).duration ?<= startTimeWorksheet(j)))
+    if (worksheets(i).mandatory && worksheets(j).mandatory)
+      add(startTimeWorksheet(i) + worksheets(i).duration <= startTimeWorksheet(j))
+    else if (worksheets(i).mandatory)
+      add( !useWorksheet(j) | (startTimeWorksheet(i) + worksheets(i).duration ?<= startTimeWorksheet(j)) )
+    else if (worksheets(j).mandatory)
+      add( !useWorksheet(i) | (startTimeWorksheet(i) + worksheets(i).duration ?<= startTimeWorksheet(j)) )
+    else
+      add( !useWorksheet(i) | !useWorksheet(j) | (startTimeWorksheet(i) + worksheets(i).duration ?<= startTimeWorksheet(j)))
   }
   // work center capacity
   // in OscaR's example of optional tasks ( https://bitbucket.org/oscarlib/oscar/src/default/oscar-cp/src/main/examples/oscar/examples/cp/scheduling/OptionalTasks.scala )
@@ -138,7 +147,7 @@ object App extends CPModel with App {
   val one = CPIntVar(1)
   val durations = Array.fill(allTasks.length)(one)
   // end is start + duration
-  val ends = (starts zip durations).map{case (start, duration) => start+duration}
+  val ends = starts.map(_ + 1)
   // demand is the number of workers needed that day
   val demands = for ((i,t) <- allTasks) yield CPIntVar(worksheets(i).nbWorkers(t))
 
@@ -178,19 +187,32 @@ object App extends CPModel with App {
   // roads will contain the road number if the worksheet is used, -1 otherwise
   val roads = for ((i,t) <- allTasks) yield optionalIntVar(worksheets(i).roads(t), useWorksheet(i)) // the road number if the worksheet is used, -1 otherwise
 
-  for (road <- 0 until N if worksheets.flatMap(_.roads).contains(road))
+  def canTherBeARoadConflict(road: Int): Boolean = {
+    val possilbeWorkTimesOnThatRoadPerWorksheet: Array[Set[Int]] = worksheets.map(w =>
+      w.roads.indices.filter(w.roads(_) == road) // get the steps of the worksheet where we work on that road
+        .map(t => (w.est+t to w.lst+t).toSet) // transform it into the range of times possible for that work
+        match {
+        case x if x.isEmpty => Set[Int]()
+        case x => x.reduce(_ union _) // do the union for all in this worksheet
+      }
+    )
+    // if the intersection of all these sets is not empty, then there is one possible conflict at least
+    possilbeWorkTimesOnThatRoadPerWorksheet.reduce(_ intersect _).nonEmpty
+  }
+
+  for (road <- 0 until N
+       if worksheets.flatMap(_.roads).contains(road) &&
+         worksheets.count(w => w.roads.contains(road)) >= 2 &&
+         canTherBeARoadConflict(road) )
     add(unaryResource(starts, durations, ends, roads, road), Weak)
 
 
   // for road crossing constraints:
-  // use atMost def atMost(n: Int, x: IndexedSeq[CPIntVar], s: Set[Int]) = {
-  // or GCC
-  // on définit une ressource par set de routes limités, avec la capacité = le nombre max de routes bloquées
-  // dans le groupe.
   for(i <- maxBlock.indices) {
     val (max, set) = maxBlock(i)
     // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
     val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise
+
     add(maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)), Weak)
   }
   // **********************
@@ -200,6 +222,8 @@ object App extends CPModel with App {
   // Maximize total gain and minimze total traffic perturbation
   val importanceArray = for (i <- worksheets.indices if useWorksheet(i).size > 1)
     yield useWorksheet(i) * worksheets(i).importance
+
+  val importanceInevitable = worksheets.indices.filter(i => useWorksheet(i).isTrue).map(i => worksheets(i).importance).sum
 
   // perturbation on each day
   // roadsToWorksheets(road) = list of worksheets that have this road
@@ -220,8 +244,6 @@ object App extends CPModel with App {
     })
     weightedSum(perturbationCostOfTime(t), isRoadWorkedOn)
   })
-
-  val importanceInevitable = worksheets.indices.filter(i => useWorksheet(i).isTrue).map(i => worksheets(i).importance).sum
 
   val objective = if (importanceArray.isEmpty) -maximum(perturbationDay) + importanceInevitable
   else sum(importanceArray) - maximum(perturbationDay) + importanceInevitable
@@ -336,7 +358,10 @@ object App extends CPModel with App {
 
   Solution.getFromFile() match {
     case Some(s) => bestSol = s
-    case None => val stats = start(1)
+    case None => {
+      println("finding first solution")
+      println(start(1))
+    }
   }
 
   var alpha = 10
@@ -356,6 +381,7 @@ object App extends CPModel with App {
     if (alpha <= 0) {
       alpha = 10
       limit *= 2
+      println(s"limit is now $limit")
     } else if (alpha >= 120) {
       println("current best:")
       println(bestSol)
@@ -365,5 +391,7 @@ object App extends CPModel with App {
       println(stats)
       System.exit(0)
     }
+
+    println(s"alpha = $alpha")
   }
 }
