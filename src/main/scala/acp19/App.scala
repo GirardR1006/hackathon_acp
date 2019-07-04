@@ -1,9 +1,12 @@
 package acp19
 
-import oscar.algo.search.Branching
+import oscar.algo.search.{Branching, IntConstrainableContext}
 import oscar.cp._
+import oscar.cp.core.delta.DeltaIntVar
+import oscar.cp.core.watcher.Watcher
 
 import scala.collection.mutable
+import scala.util.Random
 
 /**
  * @author ${user.name}
@@ -49,7 +52,11 @@ object App extends CPModel with App {
 
   // worksheets
   case class Worksheet(workcenterID: Int, mandatory: Boolean, importance: Int, est: Int, lst: Int, duration: Int,
-    roads: Array[Int], nbWorkers: Array[Int])
+    roads: Array[Int], nbWorkers: Array[Int]){override def toString(): String ={
+    "Assigned workcenter: "+ Worksheet.this.workcenterID +
+    "\nMandatory: " + Worksheet.this.mandatory +
+    "\nImportance: " + Worksheet.this.importance
+  }}
 
   var worksheets = Array[Worksheet]()
   for (i <- 0 until W) {
@@ -99,7 +106,7 @@ object App extends CPModel with App {
   // * Decision variables *
   // **********************
 
-  val startTimeWorksheet = Array.fill(W)(CPIntVar(0 until T)) // Beginning of worksheet (Array)
+  val startTimeWorksheet = Array.tabulate(W)(i => CPIntVar(worksheets(i).est, worksheets(i).lst))
   // bool var telling if we will use this worksheet or not
   val useWorksheet = Array.tabulate(W)(i =>
     if(worksheets(i).mandatory) CPBoolVar(true)
@@ -110,37 +117,12 @@ object App extends CPModel with App {
   // * Constraints *
   // ***************
 
-  // every worksheet starts after its earliest starting time
-  for (i <- 0 until W) {
-    if (worksheets(i).mandatory) add(startTimeWorksheet(i) >= worksheets(i).est)
-    else add( !useWorksheet(i) | (startTimeWorksheet(i) ?>= worksheets(i).est ) )
-  }
-
-
-  // every worksheet starts before its earliest starting time
-  for (i <- 0 until W) {
-    if (worksheets(i).mandatory) add(startTimeWorksheet(i) <= worksheets(i).lst)
-    else  add( !useWorksheet(i) | (startTimeWorksheet(i) ?<= worksheets(i).lst ) )
-  }
-
   // Precedence constraint : if worksheet i preceeds worksheet j, ensure the worksheet i will finish before j
   for ((i,j) <- prec){
     // we don't do i OR we don't do j or we do it in the right order
     add( !useWorksheet(i) | !useWorksheet(j) | (startTimeWorksheet(i) + worksheets(i).duration ?<= startTimeWorksheet(j)))
   }
   // work center capacity
-  // TODO we can use the following oscar global constraint: maxCumulativeRessource:
-  /*  Discrete Resource constraint with maximum capacity: at any time, the cumulative demands of the tasks executing on the resource id, must be <= than the capacity
-    * maxCumulativeResource(starts: Array[CPIntVar], durations: Array[CPIntVar], ends: Array[CPIntVar], demands: Array[CPIntVar], resources: Array[CPIntVar], capacity: CPIntVar, id: Int): Constraint
-    * @param starts    the variables representing the start time of the tasks
-    * @param durations the variables representing the duration of the tasks
-    * @param ends      the variables representing the completion time of the tasks, it is your responsibility to link starts, durations and ends such that start(i) + durations(i) = ends(i)
-    * @param demands   the variables representing how much each task consume of the resource
-    * @param resources the variables representing the resource where the task is scheduled
-    * @param capacity  the capacity of the resource
-    * @param id        , the resource on which we want to constraint the capacity (only tasks i with resources(i) = id are taken into account)
-    * @return a constraint enforcing that the load over the resource is always below/at its capacity at any point of time
-    */
   // in OscaR's example of optional tasks ( https://bitbucket.org/oscarlib/oscar/src/default/oscar-cp/src/main/examples/oscar/examples/cp/scheduling/OptionalTasks.scala )
   // they use a fake resource, which tasks use if they are not selected
   // then, they put maxCumulativeResource on the real resources and not the fake one.
@@ -159,10 +141,31 @@ object App extends CPModel with App {
   // demand is the number of workers needed that day
   val demands = for ((i,t) <- allTasks) yield CPIntVar(worksheets(i).nbWorkers(t))
 
-  val resourceForWorksheetOrMinusOne = for(i <- 0 until W) yield {
-    if (worksheets(i).mandatory) CPIntVar(worksheets(i).workcenterID)
-    else (useWorksheet(i) * (1 + worksheets(i).workcenterID)) - 1 // this is -1 if useWorksheet(i)=0 and workcenterID otherwise
+  // gives a var which has value if option is true and -1 otherwise
+  def optionalIntVar(value: CPIntVar, option: CPBoolVar): CPIntVar = {
+    if (option.isTrue) value
+    else if (option.isFalse) CPIntVar(-1)
+    else {
+      val newvar = CPIntVar(-1 +: value.toSeq)
+      add(option ==> (newvar ?=== value))
+      add(!option ==> (newvar ?=== -1))
+      newvar
+    }
   }
+  // gives a var which has value if option is true and -1 otherwise
+  def optionalIntVar(value: Int, option: CPBoolVar): CPIntVar = {
+    if (option.isTrue) CPIntVar(value)
+    else if (option.isFalse) CPIntVar(-1)
+    else {
+      val newvar = CPIntVar(Seq(-1, value))
+      add(option ==> (newvar ?=== value))
+      add(!option ==> (newvar ?=== -1))
+      newvar
+    }
+  }
+  val resourceForWorksheetOrMinusOne = for(i <- 0 until W)
+    yield optionalIntVar(worksheets(i).workcenterID, useWorksheet(i))
+
   val resources = for((i,t) <- allTasks) yield resourceForWorksheetOrMinusOne(i)
 
   for (workcenterID <- 0 until C) {
@@ -171,14 +174,15 @@ object App extends CPModel with App {
 
   // not two works on the same road at the same time
   // roads will contain the road number if the worksheet is used, -1 otherwise
-  val roads = for ((i,t) <- allTasks) yield {
-    if (worksheets(i).mandatory) CPIntVar(worksheets(i).roads(t))
-    else  (useWorksheet(i) * (worksheets(i).roads(t) + 1)) - 1 // the road number if the worksheet is used, -1 otherwise
-  }
-  for (road <- 0 until N) add(unaryResource(starts, durations, ends, roads, road))
+  val roads = for ((i,t) <- allTasks) yield optionalIntVar(worksheets(i).roads(t), useWorksheet(i)) // the road number if the worksheet is used, -1 otherwise
+
+  for (road <- 0 until N if worksheets.flatMap(_.roads).contains(road))
+    add(unaryResource(starts, durations, ends, roads, road))
 
 
   // for road crossing constraints:
+  // use atMost def atMost(n: Int, x: IndexedSeq[CPIntVar], s: Set[Int]) = {
+  // or GCC
   // on définit une ressource par set de routes limités, avec la capacité = le nombre max de routes bloquées
   // dans le groupe.
   for(i <- maxBlock.indices) {
@@ -186,8 +190,44 @@ object App extends CPModel with App {
     // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
     val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise. Handles worksheets not being used, because then the road will be -1, thus not in set.
 
-    add( maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)) )
+    add(maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)))
   }
+
+  // **********************
+  // * Objective function *
+  // **********************
+
+  // Maximize total gain and minimze total traffic perturbation
+  val importanceArray = for (i <- worksheets.indices if useWorksheet(i).containsTrue)
+    yield useWorksheet(i) * worksheets(i).importance
+
+  // perturbation on each day
+  // roadsToWorksheets(road) = list of worksheets that have this road
+  val roadToActivities = Array.tabulate(N)(road =>
+    allTasks.filter{case (i,t) => worksheets(i).roads(t) == road})
+
+  val perturbationCostOfTime: Array[Array[Int]]= Array.tabulate(T,N)((t,n) => perturbationCost(n)(t))
+  val perturbationDay = Array.tabulate(T)(t => {
+    val isRoadWorkedOn: Array[CPIntVar] = Array.tabulate(N)(road =>
+      // il ne peut y avoir que 0 ou 1 route active ici
+      isOr(roadToActivities(road).map{case (i,t2) => startTimeWorksheet(i)+t2 ?=== t})
+    )
+    weightedSum(perturbationCostOfTime(t), isRoadWorkedOn)
+  })
+
+  maximize(sum(importanceArray) - maximum(perturbationDay))
+
+
+  // ****************************
+  // * Search and print results *
+  // ****************************
+  val decisionVars = useWorksheet ++ startTimeWorksheet
+  search(conflictOrderingSearch(decisionVars, minDom(decisionVars), maxVal(decisionVars)))
+  onSolution{
+    for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
+  }
+  val stats = start()
+  println(stats)
 
 
   import scala.util.Random
@@ -196,6 +236,11 @@ object App extends CPModel with App {
 
 
   class Solution(val useW: Array[Boolean], val startW: Array[Int]) {
+    override val toString: String = {
+      var s = ""
+      for (i <- 0 until W if useW(i)) s += s"$i ${startW(i)}"
+      s
+    }
     lazy val realisable: Boolean = {
       try {
         val stats = startSubjectTo(nSols = 1) {
@@ -207,7 +252,7 @@ object App extends CPModel with App {
         stats.nSols >= 1
       }
       catch {
-        case _ => false
+        case x => false
       }
     }
 
@@ -217,7 +262,7 @@ object App extends CPModel with App {
         for (j <- 0 until worksheets(i).duration) {
           val t = startW(i) + j
           val road = worksheets(i).roads(j)
-          p += perturbationCost(road, t)
+          p += perturbationCost(road)(t)
         }
       }
       p
@@ -246,8 +291,4 @@ object App extends CPModel with App {
       (new1, new2)
     }
   }
-
-  for (i <- 0 until 10) println(Solution.random().realisable)
-
-
 }
