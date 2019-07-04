@@ -13,7 +13,6 @@ import scala.util.Random
  */
 object App extends CPModel with App {
   val filename = args(0)
-
   //*****************************
   //* parsing of the input file *
   //*****************************
@@ -188,17 +187,15 @@ object App extends CPModel with App {
   for(i <- maxBlock.indices) {
     val (max, set) = maxBlock(i)
     // todo si on travaille plusieurs jours sur la meme route, on peut les joindre en (start duration end)
-    val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise. Handles worksheets not being used, because then the road will be -1, thus not in set.
-
+    val isInSet = roads.map(_.isIn(set): CPIntVar) // 1 if the road is in the set, 0 otherwise
     add(maxCumulativeResource(starts, durations, ends, isInSet, CPIntVar(max)))
   }
-
   // **********************
   // * Objective function *
   // **********************
 
   // Maximize total gain and minimze total traffic perturbation
-  val importanceArray = for (i <- worksheets.indices if useWorksheet(i).containsTrue)
+  val importanceArray = for (i <- worksheets.indices if useWorksheet(i).size > 1)
     yield useWorksheet(i) * worksheets(i).importance
 
   // perturbation on each day
@@ -208,27 +205,27 @@ object App extends CPModel with App {
 
   val perturbationCostOfTime: Array[Array[Int]]= Array.tabulate(T,N)((t,n) => perturbationCost(n)(t))
   val perturbationDay = Array.tabulate(T)(t => {
-    val isRoadWorkedOn: Array[CPIntVar] = Array.tabulate(N)(road =>
+    val isRoadWorkedOn: Array[CPIntVar] = (0 until N).filter(roadToActivities(_).nonEmpty).map(road =>
       // il ne peut y avoir que 0 ou 1 route active ici
       isOr(roadToActivities(road).map{case (i,t2) => startTimeWorksheet(i)+t2 ?=== t})
     )
     weightedSum(perturbationCostOfTime(t), isRoadWorkedOn)
   })
 
-  maximize(sum(importanceArray) - maximum(perturbationDay))
-
+  if (importanceArray.isEmpty) minimize(maximum(perturbationDay))
+  else maximize(sum(importanceArray) - maximum(perturbationDay))
 
   // ****************************
   // * Search and print results *
   // ****************************
   val decisionVars = useWorksheet ++ startTimeWorksheet
+
   search(conflictOrderingSearch(decisionVars, minDom(decisionVars), maxVal(decisionVars)))
   onSolution{
     for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
   }
   val stats = start()
   println(stats)
-
 
   import scala.util.Random
   val rng = new Random(100)
