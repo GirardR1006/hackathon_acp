@@ -110,16 +110,22 @@ object App extends CPModel with App {
   // ***************
 
   // every worksheet starts after its earliest starting time
-  // TODO deal with non mandatory worksheets
-  for (i <- 0 until W if worksheets(i).mandatory) add(startTimeWorksheet(i) >= worksheets(i).est)
+  for (i <- 0 until W) {
+    if (worksheets(i).mandatory) add(startTimeWorksheet(i) >= worksheets(i).est)
+    else add( !useWorksheet(i) | (startTimeWorksheet(i) ?>= worksheets(i).est ) )
+  }
+
 
   // every worksheet starts before its earliest starting time
-  // TODO deal with non mandatory worksheets
-  for (i <- 0 until W if worksheets(i).mandatory) add(startTimeWorksheet(i) <= worksheets(i).lst)
+  for (i <- 0 until W) {
+    if (worksheets(i).mandatory) add(startTimeWorksheet(i) <= worksheets(i).lst)
+    else  add( !useWorksheet(i) | (startTimeWorksheet(i) ?<= worksheets(i).lst ) )
+  }
 
   // Precedence constraint : if worksheet i preceeds worksheet j, ensure the worksheet i will finish before j
   for ((i,j) <- prec){
-    add(startTimeWorksheet(i) + worksheets(i).duration <= startTimeWorksheet(j))
+    // we don't do i OR we don't do j or we do it in the right order
+    add( !useWorksheet(i) | !useWorksheet(j) | (startTimeWorksheet(i) + worksheets(i).duration ?<= startTimeWorksheet(j)))
   }
   // work center capacity
   // TODO we can use the following oscar global constraint: maxCumulativeRessource:
@@ -161,11 +167,11 @@ object App extends CPModel with App {
   }
 
   // not two works on the same road at the same time
+  // roads will contain the road number if the worksheet is used, -1 otherwise
   val roads = for ((i,t) <- allTasks) yield {
     if (worksheets(i).mandatory) CPIntVar(worksheets(i).roads(t))
     else  (useWorksheet(i) * (worksheets(i).roads(t) + 1)) - 1 // the road number if the worksheet is used, -1 otherwise
   }
-
   for (road <- 0 until N) add(unaryResource(starts, durations, ends, roads, road))
 
 
