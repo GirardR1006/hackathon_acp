@@ -129,13 +129,13 @@ object App extends CPModel with App {
     * @return a constraint enforcing that the load over the resource is always below/at its capacity at any point of time
     */
   // start time is the start time of the worksheet + t
-  val starts: Array[CPIntVar] = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+  val starts = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
     yield startTimeWorksheet(i) + t
   // duration of every task is 1 day
-  val durations: Array[CPIntVar] = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+  val durations = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
     yield CPIntVar(1)
-  val ends: Array[CPIntVar] = (starts zip durations).map{case (start, duration) => start+duration}
-  val demands: Array[CPIntVar] = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+  val ends = (starts zip durations).map{case (start, duration) => start+duration}
+  val demands = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
     yield CPIntVar(worksheets(i).nbWorkers(t))
   val resources = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
     yield CPIntVar(worksheets(i).workcenterID)
@@ -143,4 +143,10 @@ object App extends CPModel with App {
   for (workcenterID <- 0 until C) {
     add(maxCumulativeResource(starts, durations, ends, demands, resources, CPIntVar(c_v(workcenterID)), workcenterID))
   }
+
+  // not two works on the same road at the same time
+  // TODO there is also a global constraint unaryRessource that works with a "mandatory" variable
+  val roads = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
+    yield CPIntVar(worksheets(i).roads(t))
+  for (road <- 0 until N) add(unaryResource(starts, durations, ends, roads, road))
 }
