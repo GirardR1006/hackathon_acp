@@ -92,12 +92,18 @@ object App extends CPModel with App {
     scanner.next() // discard the next
     prec :+= (scanner.nextInt, scanner.nextInt)
   }
+  for ((i,j) <- prec) assert(! prec.contains((j,i)) )
 
   // **********************
   // * Decision variables *
   // **********************
 
   val startTimeWorksheet = Array.fill(W)(CPIntVar(0 until T)) // Beginning of worksheet (Array)
+  // bool var telling if we will use this worksheet or not
+  val useWorksheet = Array.tabulate(W)(i =>
+    if(worksheets(i).mandatory) CPBoolVar(true)
+    else CPBoolVar()
+  )
 
   // ***************
   // * Constraints *
@@ -132,25 +138,38 @@ object App extends CPModel with App {
   // they use a fake resource, which tasks use if they are not selected
   // then, they put maxCumulativeResource on the real resources and not the fake one.
   // we could do the same, have the resource be -1 if the optional task is not used, and 1 otherwise
+
+  // get a list of all the tasks. Every task is the work to do on worksheet i after t days
+  val allTasks: Array[(Int, Int)] = (for(i <- 0 until W; t <- 0 until worksheets(i).duration) yield (i, t)).toArray
+
   // start time is the start time of the worksheet + t
-  val starts = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
-    yield startTimeWorksheet(i) + t
+  val starts = for ((i,t) <- allTasks) yield startTimeWorksheet(i) + t
   // duration of every task is 1 day
-  val durations = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
-    yield CPIntVar(1)
+  val durations = for ((i,t) <- allTasks) yield CPIntVar(1)
+  // end is start + duration
   val ends = (starts zip durations).map{case (start, duration) => start+duration}
-  val demands = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
-    yield CPIntVar(worksheets(i).nbWorkers(t))
-  val resources = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
-    yield CPIntVar(worksheets(i).workcenterID)
+  // demand is the number of workers needed that day
+  val demands = for ((i,t) <- allTasks) yield CPIntVar(worksheets(i).nbWorkers(t))
+
+  val resources = for((i,t) <- allTasks) yield {
+    if (worksheets(i).mandatory) CPIntVar(worksheets(i).workcenterID)
+    else (useWorksheet(i) * (1 + worksheets(i).workcenterID)) - 1 // this is -1 if useWorksheet(i)=0 and workcenterID otherwise
+  }
 
   for (workcenterID <- 0 until C) {
     add(maxCumulativeResource(starts, durations, ends, demands, resources, CPIntVar(c_v(workcenterID)), workcenterID))
   }
 
   // not two works on the same road at the same time
-  // TODO there is also a global constraint unaryRessource that works with a "mandatory" variable
-  val roads = for (i <- 0 until W if worksheets(i).mandatory; t <- 0 until worksheets(i).duration)
-    yield CPIntVar(worksheets(i).roads(t))
+  val roads = for ((i,t) <- allTasks) yield {
+    if (worksheets(i).mandatory) CPIntVar(worksheets(i).roads(t))
+    else  (useWorksheet(i) * (worksheets(i).roads(t) + 1)) - 1 // the road number if the worksheet is used, -1 otherwise
+  }
+
   for (road <- 0 until N) add(unaryResource(starts, durations, ends, roads, road))
+
+
+  // for road crossing constraints:
+  // use atMost def atMost(n: Int, x: IndexedSeq[CPIntVar], s: Set[Int]) = {
+  // or GCC
 }
