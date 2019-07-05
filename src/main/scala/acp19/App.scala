@@ -257,10 +257,58 @@ object App extends CPModel with App {
 
   //search(conflictOrderingSearch(decisionVars, minDom(decisionVars), i => if (i < W) decisionVars(i).getMax else decisionVars(i).getMin))
 
+//  search(
+//    conflictOrderingSearch(useWorksheet.map(i => i: CPIntVar),
+//      i => worksheets(i).importance + rng.nextInt(10),
+//      i => if (rng.nextInt(10) < 7) useWorksheet(i).getMax else useWorksheet(i).getMin)
+//      ++ binarySplitIdx(startTimeWorksheet, i => worksheets(i).importance + rng.nextInt(10))
+//  )
+
+//  search(
+//    conflictOrderingSearch(useWorksheet.map(i => i: CPIntVar),
+//      i => worksheets(i).importance + rng.nextInt(10),
+//      learnValueHeuristic(useWorksheet.map(i => i: CPIntVar), maxVal(useWorksheet.map(i => i: CPIntVar))))
+//      ++ binarySplitIdx(startTimeWorksheet, minDomMaxDegree(startTimeWorksheet))
+//  )
+
+
+//  search(
+//    conflictOrderingSearch(decisionVars,
+//      i => worksheets(i%W).importance + rng.nextInt(10),
+//      learnValueHeuristic(decisionVars, i => if (i < W) decisionVars(i).getMax else decisionVars(i).median))
+//  )
+
+
+  val tripleBranching : Branching = () => { // branch 1 = median, branche 2 < mediane, branche 3 > mediane
+    startTimeWorksheet.indices.filter(i => !startTimeWorksheet(i).isBound) match {
+      case x if x.isEmpty => noAlternative
+      case x => {
+        val i = x.maxBy(i => worksheets(i).importance + rng.nextInt(10))
+        if (useWorksheet(i).isFalse) branchOne(add(startTimeWorksheet(i) === startTimeWorksheet(i).getMin))
+        else {
+          Seq[Alternative](
+            () => add(startTimeWorksheet(i) === startTimeWorksheet(i).median),
+            () => add(startTimeWorksheet(i) < startTimeWorksheet(i).median),
+            () => add(startTimeWorksheet(i) > startTimeWorksheet(i).median)
+          )
+        }
+      }
+    }
+  }
+
   search(
-    conflictOrderingSearch(useWorksheet.map(i => i: CPIntVar), identity, maxVal(useWorksheet.map(i => i: CPIntVar)))
-    ++ binarySplitIdx(startTimeWorksheet, i => worksheets(i).importance + rng.nextInt(10))
+    conflictOrderingSearch(useWorksheet.map(x => x: CPIntVar),
+      i => worksheets(i).importance + rng.nextInt(10),
+      i => useWorksheet(i).getMax
+    ) ++ tripleBranching
   )
+
+//  search(
+//    conflictOrderingSearch(useWorksheet.map(i => i: CPIntVar),
+//      i => -worksheets(i).importance + rng.nextInt(10),
+//      i => 0)
+//      ++ binarySplitIdx(startTimeWorksheet, minDomMaxDegree(startTimeWorksheet))
+//  )
 
   onSolution{
     for (i <- 0 until W if useWorksheet(i).isTrue) println(s"$i ${startTimeWorksheet(i)}")
@@ -365,14 +413,16 @@ object App extends CPModel with App {
   }
 
   var alpha = 10
-  var limit = 50
+  var limit = 10
+  var timeLimit = 1
 
   var startTime = System.currentTimeMillis()
 
   while (System.currentTimeMillis() - startTime < 2*60*60*1000) {
-    val stat = startSubjectTo(failureLimit = limit) {
+
+    val stat = startSubjectTo(failureLimit = limit, timeLimit = timeLimit) {
       for (i <- 0 until W if rng.nextInt(100) > alpha) {
-        add( startTimeWorksheet(i) === bestSol.startW(i) )
+        // add( startTimeWorksheet(i) === bestSol.startW(i) )
         add( useWorksheet(i) === (if(bestSol.useW(i)) 1 else 0 ) )
       }
     }
@@ -381,12 +431,14 @@ object App extends CPModel with App {
     if (alpha <= 0) {
       alpha = 10
       limit *= 2
-      println(s"limit is now $limit")
+      timeLimit *= 2
+
+      println(s"limit is now $limit, time limit = $timeLimit")
     } else if (alpha >= 120) {
       println("current best:")
       println(bestSol)
       println("finding best solution once and for all...")
-      val stats = start()
+      val stats = start(timeLimit = ((System.currentTimeMillis() - startTime + 2*60*60*1000)/1000).toInt)
       println(bestSol)
       println(stats)
       System.exit(0)
