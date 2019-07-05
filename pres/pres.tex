@@ -1,0 +1,131 @@
+%        File: pres.tex
+%     Created: ven. juil. 05 10:00  2019 C
+% Last Change: ven. juil. 05 10:00  2019 C
+%
+\documentclass{beamer}
+\usepackage{natbib}
+\usepackage[french]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\bibliographystyle{plainnat}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\usetikzlibrary{calc}
+\usepackage{listings}
+\newcommand{\todo}[1]{\textbf{\color{red}(TODO: #1)}}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+\newcolumntype{C}[1]{>{\centering\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+
+%Extension de la diapo de références, si nécessaire
+\setbeamertemplate{frametitle continuation}[from second]
+%Pas d'icône sur la biblio
+\setbeamertemplate{bibliography item}{}
+\mode<presentation>
+{
+    % Tout plein de thèmes à utiliser
+    %\usetheme{AnnArbor}
+    %\usetheme{Antibes}
+    %\usetheme{Bergen}
+    %\usetheme{Berkeley}
+    %\usetheme{Berlin}
+    %\usetheme{Boadilla}
+    %\usetheme{boxes}
+    \usetheme{metropolis}
+    %\usetheme{Copenhagen}
+    %\usetheme{Darmstadt} % "Classic" beamer theme
+    %\usetheme{default}
+    %\usetheme{Frankfurt}
+    %\usetheme{Goettingen}
+    %\usetheme{Hannover}
+    %\usetheme{Ilmenau}
+    %\usetheme{JuanLesPins}
+    %\usetheme{Luebeck}
+    %\usetheme{Madrid}
+    %\usetheme{Malmoe}
+    %\usetheme{Marburg}
+    %\usetheme{Montpellier}
+    %\usetheme{PaloAlto}
+    %\usetheme{Pittsburgh}
+    %\usetheme{Rochester}
+    %\usetheme{Singapore}
+    %\usetheme{Szeged}
+    %\usetheme{Warsaw}
+    %\setbeamercolor*{palette primary}{use=structure,fg=white, bg=orange}
+    %\setbeamercolor*{palette secondary}{use=structure,fg=white, bg=darkbrown}
+    \setbeamercolor*{palette tertiary}{use=structure,fg=white,bg=darkred}
+    \defbeamertemplate*{footline}{example theme}
+    {
+        \usebeamerfont{footline}%
+        \usebeamercolor[fg]{footline}%
+        \hfill
+        \begin{minipage}[c]{8.5cm}
+            \vspace{2mm}
+            \centering
+            \color{gray}
+            \insertshorttitle\hspace{2cm}\insertdate
+        \end{minipage}
+        \hspace{2.5mm}
+        \begin{minipage}[c]{2cm}
+        \end{minipage}
+        \hspace{2mm}
+        \begin{minipage}[c]{8mm}
+            \vspace{2mm}
+            \insertframenumber~/~\inserttotalframenumber
+        \end{minipage}
+        \hspace{2mm}
+        \vspace{1mm}
+    }
+    \beamertemplatenavigationsymbolsempty
+}
+\title{Our entry of ACP 2019 Summer Hackathon}
+\author{Quentin Fabry, Julien Girard, Alex Mattenet, Adriana Pacheco}
+\date{\today}
+\begin{document}
+\begin{frame}
+        \maketitle
+\end{frame}
+\begin{frame}{Our technology}
+        
+        OSCAR Solver
+
+        \begin{figure}[h!]
+            \centering
+            \includegraphics[width=0.8\textwidth]{oscar.png}
+        \end{figure}
+
+\end{frame}
+
+\begin{frame}{Our Heuristics}
+    \begin{itemize}
+        \item Decision on optional worksheets: take first those which scores
+            higher (add noise for random)
+        \item First research: set all optional worksheets on mandatory, then
+            conflict ordering search
+        \item Split on starting time of worksheet: first start at median time,
+            if fails split domain in two halves
+        \item Basic LNS with full relaxation on worksheets starting time
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Our code}
+\Large
+\centering
+
+    Repository is available at
+    \href{https://github.com/GirardR1006/hackathon_acp}{https://github.com/GirardR1006/hackathon\_acp}
+
+
+    Feel free to fork it!
+    
+\end{frame}
+
+\begin{frame}{Questions?}
+\centering
+\Huge
+Shoot your questions :) 
+\end{frame}
+\end{document}
+
+

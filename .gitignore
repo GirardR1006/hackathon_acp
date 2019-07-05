@@ -1,2 +1,9 @@
 *.pdf
 .idea
+*.aux
+*.nav
+*.log
+*.out
+*.snm
+*.gz
+*.toc
